@@ -1,0 +1,10 @@
+cfg.py
+tests
+phone_num_imgs
+program_time_status.txt
+avito_history.csv
+cian_history.csv
+avito_total.csv
+cian_total.csv
+__pycache__
+main.exe

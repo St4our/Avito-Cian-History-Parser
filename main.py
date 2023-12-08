@@ -9,6 +9,7 @@ import smtplib
 import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import urllib.request
 
 
 from hcaptcha_solver import hcaptcha_solver
@@ -19,7 +20,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import (NoSuchElementException, TimeoutException)
 from selenium.webdriver.support.ui import WebDriverWait
 from bs4 import BeautifulSoup as BS
-import urllib.request
 import pytesseract
 from PIL import Image
 

@@ -271,7 +271,7 @@ def cian_parse(driver: ChromeDriver, region_id: str):
 
     # we have a first page => &p=1
     page_url = f'https://www.cian.ru/cat.php?deal_type=sale&engine_version=2&object_type%5B0%5D=3&offer_type=suburban&p=1&region={region_id}'
-    for page_n in range(1, 2):
+    for page_n in range(1, 5_000):
         if page_n > 1:
             page_url = page_url.replace(f'&p={page_n-1}', f'&p={page_n}')
         # collect current (first) page and replace to 2 3 4 5...
@@ -439,7 +439,7 @@ def avito_parse(driver: ChromeDriver, region_id):
     ex = ''   # Doesnt have any exceptions on start function
 
     page_url = f'https://www.avito.ru/{region_id}/zemelnye_uchastki?cd=1&p=1'
-    for page_n in range(1, 2):   
+    for page_n in range(1, 5_000):   
         if page_n > 1:
             page_url = page_url.replace(f'&p={page_n-1}', f'&p={page_n}')
         # collect current (first) page and replace to 2 3 4 5...

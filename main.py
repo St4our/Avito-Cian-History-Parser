@@ -1,11 +1,10 @@
+import logging
 import re
 import os
-# import json
 from datetime import datetime, timedelta, time
 from itertools import groupby
 from time import sleep
 import csv
-# import getpass
 import smtplib
 import ssl
 from email.mime.text import MIMEText
@@ -47,7 +46,8 @@ def send_email_msg(body_msg, subject_msg, send_from, password, send_to):
         msg.attach(MIMEText(body_msg, "plain"))
         
         # Send the message
-        smtp.sendmail(from_addr=send_from, to_addrs=send_to, msg=msg.as_string())
+        send_errors = smtp.sendmail(from_addr=send_from, to_addrs=send_to, msg=msg.as_string())
+        return send_errors
 
 # def send_email_msg(driver, msg, subject, send_to):
 #     print(f'[+]Start send [{msg}] msg to [{send_to}] user, using mail.ru service')
@@ -194,9 +194,6 @@ def cian_parse_cards(driver, collected_cards):
         additional_address = ' | '.join(
             [e.find('a').text.strip() + ' ' + e.find('div').text.strip() for e in card.find_all('div', class_='_93444fe79c--container--w7txv')]).replace('\n', '|')
         address = additional_address + ' | ' + card.find('div', {'class': '_93444fe79c--labels--L8WyJ'}).text.strip().replace('\n', '|')
-        # has_house = True if card.find('div', {'data-name': 'FeatureLabels'}) else None
-        # status = "Активно" if card.find('div', {'data-name': 'GeneralInfoSectionRowComponent'}) else "Закрыто"
-        # date_created = card.find('div', class_='_93444fe79c--absolute--yut0v').find('span').text.strip()
 
         electric = 'Не указано'
         gaz = 'Не указано'
@@ -206,15 +203,6 @@ def cian_parse_cards(driver, collected_cards):
         # request and collect this data
         driver.get(link)
         sleep(3)
-        # click to views count
-        # try:
-            # driver.find_element(By.XPATH, '//button[@data-name="OfferStats"]')
-        # except NoSuchElementException:
-            # total_views = 'Не указано'
-            # date_created = 'Не указано'
-        # else:
-            # sleep(3)
-            # total_views_data = driver.find_element(By.XPATH, '//div[@data-testid="metadata-added-date"]').text
         date_created_text = driver.find_element(By.XPATH, '//div[@data-testid="metadata-added-date"]').text
         date_created = date_created_text.split('Обновлено:')
         if len(date_created) > 1:
@@ -266,7 +254,8 @@ def cian_parse_cards(driver, collected_cards):
             'electric': electric,
             'gaz': gaz,
             'water': water,
-            'sewarage': sewarage
+            'sewarage': sewarage,
+            'parse_timestamp': str(datetime.now().strftime(TIMESTAMP_DT_FORMAT)),
         }
         if not any([dict_card['ad_id'] == dict_2_card['ad_id'] for dict_2_card in collected_cards]):
             print(dict_card)
@@ -282,7 +271,7 @@ def cian_parse(driver: ChromeDriver, region_id: str):
 
     # we have a first page => &p=1
     page_url = f'https://www.cian.ru/cat.php?deal_type=sale&engine_version=2&object_type%5B0%5D=3&offer_type=suburban&p=1&region={region_id}'
-    for page_n in range(1, 5_000):
+    for page_n in range(1, 2):
         if page_n > 1:
             page_url = page_url.replace(f'&p={page_n-1}', f'&p={page_n}')
         # collect current (first) page and replace to 2 3 4 5...
@@ -434,7 +423,8 @@ def avito_ads_parse(driver, collected_ads):
             "ad_date_created": ad_publ_time,
             'ad_total_views': ad_total_views,
             # 'ad_today_views': ad_today_views,
-            "ad_phone": phone_num
+            "ad_phone": phone_num,
+            'parse_timestamp': str(datetime.now().strftime(TIMESTAMP_DT_FORMAT)),
         }
         if not any([ad_dict_new['ad_id'] == ad_d['ad_id'] for ad_d in collected_ads]):
             print(ad_dict_new)
@@ -449,7 +439,7 @@ def avito_parse(driver: ChromeDriver, region_id):
     ex = ''   # Doesnt have any exceptions on start function
 
     page_url = f'https://www.avito.ru/{region_id}/zemelnye_uchastki?cd=1&p=1'
-    for page_n in range(1, 5_000):   
+    for page_n in range(1, 2):   
         if page_n > 1:
             page_url = page_url.replace(f'&p={page_n-1}', f'&p={page_n}')
         # collect current (first) page and replace to 2 3 4 5...
@@ -567,30 +557,30 @@ def avito_convert_date(date_string):
 
 
 
-def update_total_csv(ads_data, fn):
+def update_total_csv(ads_data: list, fn):
     csv_ads_id = []
     if os.path.exists(fn):
         with open(fn, 'r', encoding='utf-8') as file:
             reader = csv.DictReader(file)
             csv_ads_id = [str(row['ad_id']) for row in reader]
+
+    # process ads_data
+    process_ads_data = ads_data.copy()
+    for ad in process_ads_data:
+        del ad['parse_timestamp']
     
     # Сохранение данных в CSV файл
     with open(fn, 'a', newline='', encoding='utf-8') as file:
-        writer = csv.DictWriter(file, fieldnames=ads_data[0].keys())
+        writer = csv.DictWriter(file, fieldnames=process_ads_data[0].keys())
         
         # записать заголовки если файл новый
         if not csv_ads_id:
             writer.writeheader()
 
         # Write new data only if 'ad_id' not in csv_ads_id
-        for ad in ads_data:
+        for ad in process_ads_data:
             if str(ad['ad_id']) not in csv_ads_id:
                 writer.writerow(ad)
-
-
-# def read_total_csv(fn):
-#     # Чтение данных из CSV файла и возвращение в виде списка словарей
-
 
 
 def read_history_csv(fn):
@@ -606,11 +596,11 @@ def read_history_csv(fn):
             for key, group in groupby(reader, key=lambda row: row[0]):
                 ad_data = {'ad_id': key, 'prices': [], 'views': []}
                 for row in group:
-                    date, ad_total_price, ad_total_views = row[1:]
+                    parse_timestamp, ad_total_price, ad_total_views = row[1:]
                     if ad_total_price:
-                        ad_data['prices'].append({'date': date, 'ad_total_price': ad_total_price})
+                        ad_data['prices'].append({'timestamp': parse_timestamp, 'ad_total_price': ad_total_price})
                     if ad_total_views:
-                        ad_data['views'].append({'date': date, 'ad_total_views': int(ad_total_views)})
+                        ad_data['views'].append({'timestamp': parse_timestamp, 'ad_total_views': int(ad_total_views)})
                 data.append(ad_data)
     return data
 
@@ -626,14 +616,14 @@ def update_history_csv(ads_data, fn):
 
         if existing_ad:
             # Update existing ad with new prices and views
-            existing_ad['prices'].insert(0, {'ad_total_price': ad['ad_total_price'], 'date': str(datetime.now())})
-            existing_ad['views'].insert(0, {'ad_total_views': ad['ad_total_views'], 'date': str(datetime.now())})
+            existing_ad['prices'].insert(0, {'ad_total_price': ad['ad_total_price'], 'timestamp': ad['parse_timestamp']})
+            existing_ad['views'].insert(0, {'ad_total_views': ad['ad_total_views'], 'timestamp': ad['parse_timestamp']})
         else:
             # Add new ad
             ad_dict = {
                 'ad_id': ad_id, 
-                'prices': [{'ad_total_price': ad['ad_total_price'], 'date': str(datetime.now())}], 
-                'views': [{'ad_total_views': ad['ad_total_views'], 'date': str(datetime.now())}]
+                'prices': [{'ad_total_price': ad['ad_total_price'], 'timestamp': ad['parse_timestamp']}], 
+                'views': [{'ad_total_views': ad['ad_total_views'], 'timestamp': ad['parse_timestamp']}]
             }
             existing_ads.append(ad_dict)
     
@@ -641,9 +631,8 @@ def update_history_csv(ads_data, fn):
     with open(fn, 'w', newline='', encoding='utf-8') as file:
         writer = csv.writer(file)
 
-        # Write the header row
-        if not existing_ads:
-            writer.writerow(['ad_id', 'date', 'ad_total_price', 'ad_total_views'])
+        # write headers because we rewrite ads
+        writer.writerow(['ad_id', 'timestamp', 'ad_total_price', 'ad_total_views'])
 
         # Write the updated data to the file
         for ad in existing_ads:
@@ -651,11 +640,13 @@ def update_history_csv(ads_data, fn):
             
             # Extract and write price history
             for price, view in zip(ad.get('prices'), ad.get('views', [])):
-                date = price['date']
+                timestamp = price['timestamp']
+                assert price['timestamp'] == view['timestamp'], f'View timestamp and price timestamp is not equal (ad_id - {ad_id})'
                 ad_total_views = view['ad_total_views']
                 ad_total_price = price['ad_total_price']
-                ad_data = [ad_id, date, ad_total_price, ad_total_views]
+                ad_data = [ad_id, timestamp, ad_total_price, ad_total_views]
                 writer.writerow(ad_data)
+
 
 
 def sleep_to_point(point: datetime):
@@ -676,31 +667,37 @@ def sleep_to_point(point: datetime):
                 sleep(unit if name != 'seconds' else units_count)
 
 
+# def write_execution_logs(text, fn='execution_log.txt'):
+#     with open(fn, 'a', encoding='utf-8') as f:
+#             f.write(text + '\n')
+
+
 def main():
+    # create logger
+    logging.basicConfig(
+        filename='execution.log', level=logging.INFO, 
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        encoding='utf-8')
+
     while True:
-        # next program run in the 22:00
-        msg = f'[+]Начало работы парсера - {[{str(datetime.now())}]}'
-        print(msg)
-        with open('program_time_status.txt', 'a', encoding='utf-8') as f:
-            f.write(msg + '\n')
+        # (next program run in the 22:00)
+        msg = f'Начало работы парсера'
+        logging.info(msg)
+        # write_execution_logs(msg)
 
         # check exceptions and send emails about it
         exceptions_msg = ''
     
         # set ocr tesseract path
         if not os.path.exists(TESSERACT_OCR_PATH):
-            ex = 'Programm was not found tesseract ocr .exe file ;('
-            print(ex)
-            exceptions_msg += f'EXCEPTION WITH FIND OCR_TESSERACT:\n{ex}\n'
+            msg = f'EXCEPTION WITH FIND OCR_TESSERACT:\nProgramm was not found tesseract ocr .exe file ;(\n'
+            print(msg)
+            exceptions_msg += msg
+            logging.error(msg)
         else:
             # save ocr path and start parsing
             pytesseract.pytesseract.tesseract_cmd = TESSERACT_OCR_PATH
-            # parsing only 1-2 pages !!!!! from avito and cian too
-            # avito_ads = [
-            #     {'ad_name': 'Участок 20 сот. (промназначения)', 'ad_area': '20 сот.', 'ad_id': 2425395044, 'ad_link': 'https://www.avito.ru/moskva/zemelnye_uchastki/uchastok_20_sot._promnaznacheniya_2425395044', 'ad_total_price': 600000.0, 'ad_type_company': 'Агентство', 'gaz': 'Не указано', 'water': 'Не указано', 'sewarage': 'Не указано', 'electric': 'Не указано', 'ad_unit_price': 1138462.0, 'ad_address': 'Москва, Варшавское ш., 170\nСимферопольское шоссе', 'ad_date_created': '· вчера в 11:44', 'ad_total_views': 5023, 'ad_phone': '8 915 408-72-98'},
-            #     {'ad_name': 'Участок 6,5 сот. (ИЖС)', 'ad_area': 'Не указано', 'ad_id': 2391017532, 'ad_link': 'https://www.avito.ru/pavlovskaya_sloboda/zemelnye_uchastki/uchastok_65_sot._izhs_2391017532', 'ad_total_price': 7400000.0, 'ad_type_company': 'Частное лицо', 'gaz': 'Упоминаеться', 'water': 'Не указано', 'sewarage': 'Не указано', 'electric': 'Не указано', 'ad_unit_price': 1138462.0, 'ad_address': 'Московская область, г.о. Истра, д. Покровское, Новорижский б-р\nВолоколамское шоссе, 25 км', 'ad_date_created': '· вчера в 16:19', 'ad_total_views': 1197, 'ad_phone': '8 965 174-23-81'},
-            #     {'ad_name': 'Участок 5,5 сот. (ИЖС)', 'ad_area': '5.5 сот.', 'ad_id': 3906575970, 'ad_link': 'https://www.avito.ru/moskovskaya_oblast_troitskoe/zemelnye_uchastki/uchastok_55_sot._izhs_3906575970', 'ad_total_price': 1200000.0, 'ad_type_company': 'Агентство', 'gaz': 'Упоминаеться', 'water': 'Упоминаеться', 'sewarage': 'Не указано', 'electric': 'Не указано', 'ad_unit_price': 1138462.0, 'ad_address': 'Московская область, г.о. Домодедово, д. Минаево, коттеджный пос. Южный парк\nНовокаширское шоссе, 35 км', 'ad_date_created': '· 1 декабря в 09:43', 'ad_total_views': 708, 'ad_phone': 'Не получилось выгрузить номер телефона'},
-            # ]
+            
             with RootChromeDriver()._init_local_driver() as driver:
                 # parsing moskow and MO
                 
@@ -755,7 +752,9 @@ def main():
                     if ex_str:
                         exceptions_msg += ex_str
             except Exception as ex:
-                exceptions_msg += '\nEXCEPTION WITH UNPACK AVITO PARSED DATA\n'
+                msg = f'\nEXCEPTION WITH UNPACK AVITO PARSED DATA\n{ex}\n'
+                exceptions_msg += msg
+                logging.error(msg)
         
             # unpack cian_parsed
             try:
@@ -765,43 +764,136 @@ def main():
                     if ex_str:
                         exceptions_msg += ex_str
             except Exception as ex:
-                exceptions_msg += '\nEXCEPTION WITH UNPACK CIAN PARSED DATA\n'
+                msg += f'\nEXCEPTION WITH UNPACK CIAN PARSED DATA\n{ex}\n'
+                exceptions_msg += msg
+                logging.error(msg)
+            
+            # avito_ads = [
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок 20 сот. (промназначения)', 'ad_area': '20 сот.', 'ad_id': '2425395044', 'ad_link': 'https://www.avito.ru/moskva/zemelnye_uchastki/uchastok_20_sot._promnaznacheniya_2425395044', 'ad_total_price': 600000.0, 'ad_type_company': 'Агентство', 'gaz': 'Не указано', 'water': 'Не указано', 'sewarage': 'Не указано', 'electric': 'Не указано', 'ad_unit_price': 1138462.0, 'ad_address': 'Москва, Варшавское ш., 170\nСимферопольское шоссе', 'ad_date_created': '· вчера в 11:44', 'ad_total_views': 5023, 'ad_phone': '8 915 408-72-98'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок 6,5 сот. (ИЖС)', 'ad_area': 'Не указано', 'ad_id': '2391017532', 'ad_link': 'https://www.avito.ru/pavlovskaya_sloboda/zemelnye_uchastki/uchastok_65_sot._izhs_2391017532', 'ad_total_price': 7400000.0, 'ad_type_company': 'Частное лицо', 'gaz': 'Упоминаеться', 'water': 'Не указано', 'sewarage': 'Не указано', 'electric': 'Не указано', 'ad_unit_price': 1138462.0, 'ad_address': 'Московская область, г.о. Истра, д. Покровское, Новорижский б-р\nВолоколамское шоссе, 25 км', 'ad_date_created': '· вчера в 16:19', 'ad_total_views': 1197, 'ad_phone': '8 965 174-23-81'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок 5,5 сот. (ИЖС)', 'ad_area': '5.5 сот.', 'ad_id': '3906575970', 'ad_link': 'https://www.avito.ru/moskovskaya_oblast_troitskoe/zemelnye_uchastki/uchastok_55_sot._izhs_3906575970', 'ad_total_price': 1200000.0, 'ad_type_company': 'Агентство', 'gaz': 'Упоминаеться', 'water': 'Упоминаеться', 'sewarage': 'Не указано', 'electric': 'Не указано', 'ad_unit_price': 1138462.0, 'ad_address': 'Московская область, г.о. Домодедово, д. Минаево, коттеджный пос. Южный парк\nНовокаширское шоссе, 35 км', 'ad_date_created': '· 1 декабря в 09:43', 'ad_total_views': 708, 'ad_phone': 'Не получилось выгрузить номер телефона'}
+            # ]
+            
+            # cian_ads = [
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 380 сот., ИЖС', 'ad_total_views': 2391, 'ad_id': '285820345', 'ad_area': '380сот.', 'ad_total_price': 90000000.0, 'ad_address': 'Калужское шоссе \nМосква, ТАО (Троицкий), Михайлово-Ярцевское поселение, д. Пудово-Сипягино', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 962 369-02-16', 'ad_link': 'https://www.cian.ru/sale/suburban/285820345/', 'ad_date_created': 'сегодня, 09:15', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 30 сот., ИЖС', 'ad_total_views': 476, 'ad_id': '293882436', 'ad_area': '30сот.', 'ad_total_price': 9000000.0, 'ad_address': 'Киевское шоссе \nМосква, ТАО (Троицкий), Михайлово-Ярцевское поселение, Ярцево лайф кп', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 962 363-97-64', 'ad_link': 'https://www.cian.ru/sale/suburban/293882436/', 'ad_date_created': '21 ноя, 04:02', 'electric': 'Не указано', 'gaz': 'Не указано', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 30 сот., ИЖС', 'ad_total_views': 1129, 'ad_id': '291191736', 'ad_area': '30сот.', 'ad_total_price': 28900000.0, 'ad_address': 'Киевское шоссе \nРассудово \nМосква, ТАО (Троицкий), Новофедоровское поселение, д. Кузнецово, Вик кп', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 964 792-63-98', 'ad_link': 'https://www.cian.ru/sale/suburban/291191736/', 'ad_date_created': '29 ноя, 17:28', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Не указано', 'sewarage': 'Не указано'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 5 сот.', 'ad_total_views': 223, 'ad_id': '295560844', 'ad_area': '5сот.', 'ad_total_price': 2500000.0, 'ad_address': 'Боровское шоссе \nРассудово \nМосква, ТАО (Троицкий), Новофедоровское поселение, Фаворит кп', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 905 719-68-72', 'ad_link': 'https://www.cian.ru/sale/suburban/295560844/', 'ad_date_created': '1 дек, 13:50', 'electric': 'Есть', 'gaz': 'Не указано', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 17 сот.', 'ad_total_views': 15939, 'ad_id': '260461141', 'ad_area': '17сот.', 'ad_total_price': 381488074.0, 'ad_address': 'Покровское-Стрешнево \nМосква, СЗАО, р-н Хорошево-Мневники, Таманская улица, вл111', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 966 153-69-63', 'ad_link': 'https://www.cian.ru/sale/suburban/260461141/', 'ad_date_created': '29 ноя, 17:28', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Не указано', 'sewarage': 'Не указано'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 7.94 сот., ИЖС', 'ad_total_views': 53, 'ad_id': '293667889', 'ad_area': '7,94сот.', 'ad_total_price': 3176000.0, 'ad_address': 'Калужское шоссе \nМосква, ТАО (Троицкий), Вороновское поселение, д. Юрьевка', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 967 209-09-70', 'ad_link': 'https://www.cian.ru/sale/suburban/293667889/', 'ad_date_created': '4 ноя, 07:40', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Есть', 'sewarage': 'Не указано'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 6 сот., ИЖС', 'ad_total_views': 1126, 'ad_id': '295044485', 'ad_area': '6сот.', 'ad_total_price': 2400000.0, 'ad_address': 'Калужское шоссе \nАпрелевка \nМосква, ТАО (Троицкий), Краснопахорское поселение, Цветочный кп, 215', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 964 557-78-64', 'ad_link': 'https://www.cian.ru/sale/suburban/295044485/', 'ad_date_created': '2 дек, 10:16', 'electric': 'Есть', 'gaz': 'Магистральный по границе', 'water': 'Скважина', 'sewarage': 'Септик'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 6.78 сот.', 'ad_total_views': 19, 'ad_id': '295560868', 'ad_area': '6,78сот.', 'ad_total_price': 3390000.0, 'ad_address': 'Боровское шоссе \nРассудово \nМосква, ТАО (Троицкий), Новофедоровское поселение, Фаворит кп', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 905 719-68-72', 'ad_link': 'https://www.cian.ru/sale/suburban/295560868/', 'ad_date_created': '1 дек, 13:50', 'electric': 'Есть', 'gaz': 'Не указано', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 6 сот., ИЖС', 'ad_total_views': 5388, 'ad_id': '288572325', 'ad_area': '6сот.', 'ad_total_price': 2400000.0, 'ad_address': 'Калужское шоссе \nМосква, ТАО (Троицкий), Вороновское поселение, № 415 кв-л', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 916 544-10-85', 'ad_link': 'https://www.cian.ru/sale/suburban/288572325/', 'ad_date_created': '2 дек, 10:14', 'electric': 'Есть', 'gaz': 'Магистральный по границе', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 8.71 сот., ИЖС', 'ad_total_views': 223, 'ad_id': '295285529', 'ad_area': '8,71сот.', 'ad_total_price': 3427100.0, 'ad_address': 'Киевское шоссе \nМосква, ТАО (Троицкий), Михайлово-Ярцевское поселение, Ярцево лайф кп', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 962 363-97-64', 'ad_link': 'https://www.cian.ru/sale/suburban/295285529/', 'ad_date_created': '21 ноя, 07:38', 'electric': 'Не указано', 'gaz': 'Не указано', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 7 сот., ИЖС', 'ad_total_views': 406, 'ad_id': '295044779', 'ad_area': '7сот.', 'ad_total_price': 2800000.0, 'ad_address': 'Калужское шоссе \nМосква, ТАО (Троицкий), Вороновское поселение, № 10 кв-л', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 964 557-78-64', 'ad_link': 'https://www.cian.ru/sale/suburban/295044779/', 'ad_date_created': '2 дек, 10:18', 'electric': 'Есть', 'gaz': 'Магистральный по границе', 'water': 'Скважина', 'sewarage': 'Септик'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 6.5 сот.', 'ad_total_views': 6, 'ad_id': '295560811', 'ad_area': '6,5сот.', 'ad_total_price': 3900000.0, 'ad_address': 'Боровское шоссе \nРассудово \nМосква, ТАО (Троицкий), Новофедоровское поселение, Фаворит кп', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 905 719-68-72', 'ad_link': 'https://www.cian.ru/sale/suburban/295560811/', 'ad_date_created': '1 дек, 13:50', 'electric': 'Есть', 'gaz': 'Не указано', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 7.9 сот., ИЖС', 'ad_total_views': 2356, 'ad_id': '288572574', 'ad_area': '7,9сот.', 'ad_total_price': 2800000.0, 'ad_address': 'Калужское шоссе \nМосква, ТАО (Троицкий), Вороновское поселение, № 415 кв-л', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 916 544-10-85', 'ad_link': 'https://www.cian.ru/sale/suburban/288572574/', 'ad_date_created': '2 дек, 10:15', 'electric': 'Есть', 'gaz': 'Магистральный по границе', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 9.8 сот., ИЖС', 'ad_total_views': 43, 'ad_id': '295285562', 'ad_area': '9,8сот.', 'ad_total_price': 4018000.0, 'ad_address': 'Киевское шоссе \nМосква, ТАО (Троицкий), Михайлово-Ярцевское поселение, Ярцево лайф кп', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 962 363-97-64', 'ad_link': 'https://www.cian.ru/sale/suburban/295285562/', 'ad_date_created': '21 ноя, 07:38', 'electric': 'Не указано', 'gaz': 'Не указано', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 7 сот., ИЖС', 'ad_total_views': 524, 'ad_id': '294728361', 'ad_area': '7сот.', 'ad_total_price': 2800000.0, 'ad_address': 'Калужское шоссе \nМосква, ТАО (Троицкий), Краснопахорское поселение, № 123 кв-л', 'ad_type_company': 'Риелтор', 'ad_phone': '+7 964 538-95-39', 'ad_link': 'https://www.cian.ru/sale/suburban/294728361/', 'ad_date_created': '2 дек, 10:08', 'electric': 'Есть', 'gaz': 'Магистральный по границе', 'water': 'Скважина', 'sewarage': 'Септик'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 13.63 сот., ИЖС', 'ad_total_views': 68, 'ad_id': '295285547', 'ad_area': '13,63сот.', 'ad_total_price': 4050000.0, 'ad_address': 'Киевское шоссе \nМосква, ТАО (Троицкий), Михайлово-Ярцевское поселение, Ярцево лайф кп', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 962 363-97-64', 'ad_link': 'https://www.cian.ru/sale/suburban/295285547/', 'ad_date_created': '21 ноя, 07:38', 'electric': 'Не указано', 'gaz': 'Не указано', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 12 сот., ИЖС', 'ad_total_views': 216, 'ad_id': '294728489', 'ad_area': '12сот.', 'ad_total_price': 4800000.0, 'ad_address': 'Калужское шоссе \nМосква, ТАО (Троицкий), Краснопахорское поселение, № 123 кв-л', 'ad_type_company': 'Риелтор', 'ad_phone': '+7 964 538-95-39', 'ad_link': 'https://www.cian.ru/sale/suburban/294728489/', 'ad_date_created': '2 дек, 10:09', 'electric': 'Есть', 'gaz': 'Магистральный по границе', 'water': 'Скважина', 'sewarage': 'Септик'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 16.52 сот., ИЖС', 'ad_total_views': 376, 'ad_id': '293667859', 'ad_area': '16,52сот.', 'ad_total_price': 4956000.0, 'ad_address': 'Калужское шоссе \nМосква, ТАО (Троицкий), Вороновское поселение, д. Юрьевка', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 967 209-09-70', 'ad_link': 'https://www.cian.ru/sale/suburban/293667859/', 'ad_date_created': '3 ноя, 18:31', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Есть', 'sewarage': 'Не указано'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок в элитном поселке', 'ad_total_views': 524, 'ad_id': '294425662', 'ad_area': '8,1сот.', 'ad_total_price': 6000000.0, 'ad_address': 'Киевское шоссе \nБекасово I \nМосква, ТАО (Троицкий), Новофедоровское поселение, д. Архангельское, улица Барятинская, 27', 'ad_type_company': '', 'ad_phone': '+7 985 632-85-50', 'ad_link': 'https://www.cian.ru/sale/suburban/294425662/', 'ad_date_created': '30 ноя, 12:54', 'electric': 'Есть', 'gaz': 'Магистральный по границе', 'water': 'Центральное', 'sewarage': 'Центральная'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 10.59 сот., ИЖС', 'ad_total_views': 19, 'ad_id': '293667862', 'ad_area': '10,59сот.', 'ad_total_price': 5295000.0, 'ad_address': 'Калужское шоссе \nМосква, ТАО (Троицкий), Вороновское поселение, д. Юрьевка', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 967 209-09-70', 'ad_link': 'https://www.cian.ru/sale/suburban/293667862/', 'ad_date_created': '11 окт, 07:56', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Есть', 'sewarage': 'Не указано'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок с пропиской в Москве', 'ad_total_views': 3874, 'ad_id': '283149842', 'ad_area': '7,91сот.', 'ad_total_price': 3559500.0, 'ad_address': 'Калужское шоссе \nМосква, ТАО (Троицкий), Михайлово-Ярцевское поселение, Ярцево лайф кп', 'ad_type_company': 'Ук・оф.Представитель', 'ad_phone': '+7 966 062-84-69', 'ad_link': 'https://www.cian.ru/sale/suburban/283149842/', 'ad_date_created': '29 ноя, 10:15', 'electric': 'Есть', 'gaz': 'Нет', 'water': 'Не указано', 'sewarage': 'Не указано'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 8.85 сот.', 'ad_total_views': 3, 'ad_id': '295560882', 'ad_area': '8,85сот.', 'ad_total_price': 5310000.0, 'ad_address': 'Боровское шоссе \nРассудово \nМосква, ТАО (Троицкий), Новофедоровское поселение, Фаворит кп', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 905 719-68-72', 'ad_link': 'https://www.cian.ru/sale/suburban/295560882/', 'ad_date_created': '1 дек, 13:51', 'electric': 'Есть', 'gaz': 'Не указано', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Дача около Троицка, 200м от пруда', 'ad_total_views': 540, 'ad_id': '295047506', 'ad_area': '6сот.', 'ad_total_price': 4200000.0, 'ad_address': 'Калужское шоссе \nОльховая \nМосква, ТАО (Троицкий), м. Ольховая, Краснопахорское поселение, № 233 кв-л', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 964 782-20-28', 'ad_link': 'https://www.cian.ru/sale/suburban/295047506/', 'ad_date_created': '1 дек, 17:05', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Есть', 'sewarage': 'Не указано'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 12.1 сот., ИЖС', 'ad_total_views': 77, 'ad_id': '292320281', 'ad_area': '12,1сот.', 'ad_total_price': 6050000.0, 'ad_address': 'Калужское шоссе \nМосква, ТАО (Троицкий), Вороновское поселение, д. Юрьевка', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 967 209-09-70', 'ad_link': 'https://www.cian.ru/sale/suburban/292320281/', 'ad_date_created': '3 ноя, 07:47', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Есть', 'sewarage': 'Не указано'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Суперучасток по  суперцене Москва', 'ad_total_views': 3663, 'ad_id': '273294100', 'ad_area': '8сот.', 'ad_total_price': 6499999.0, 'ad_address': 'Калужское шоссе \nМосква, ТАО (Троицкий), Краснопахорское поселение, Лисья горка кп', 'ad_type_company': 'Риелтор', 'ad_phone': '+7 909 980-89-97', 'ad_link': 'https://www.cian.ru/sale/suburban/273294100/', 'ad_date_created': '1 дек, 09:01', 'electric': 'Есть', 'gaz': 'Нет', 'water': 'Есть', 'sewarage': 'Нет'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 11.96 сот.', 'ad_total_views': 31, 'ad_id': '295039891', 'ad_area': '11,96сот.', 'ad_total_price': 6500000.0, 'ad_address': 'Боровское шоссе \nРассудово \nМосква, ТАО (Троицкий), Новофедоровское поселение, Фаворит кп', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 905 719-68-72', 'ad_link': 'https://www.cian.ru/sale/suburban/295039891/', 'ad_date_created': '1 дек, 13:51', 'electric': 'Есть', 'gaz': 'Не указано', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 11 сот., ИЖС', 'ad_total_views': 114, 'ad_id': '295410311', 'ad_area': '11сот.', 'ad_total_price': 6500000.0, 'ad_address': 'Калужское шоссе \nПрокшино \nМосква, ТАО (Троицкий), м. Прокшино, Краснопахорское поселение, д. Подосинки, 63', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 916 603-46-48', 'ad_link': 'https://www.cian.ru/sale/suburban/295410311/', 'ad_date_created': '27 ноя, 16:18', 'electric': 'Есть', 'gaz': 'Нет', 'water': 'Не указано', 'sewarage': 'Нет'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 14.44 сот., ИЖС', 'ad_total_views': 60, 'ad_id': '295285552', 'ad_area': '14,44сот.', 'ad_total_price': 6884000.0, 'ad_address': 'Киевское шоссе \nМосква, ТАО (Троицкий), Михайлово-Ярцевское поселение, Ярцево лайф кп', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 962 363-97-64', 'ad_link': 'https://www.cian.ru/sale/suburban/295285552/', 'ad_date_created': '21 ноя, 07:38', 'electric': 'Не указано', 'gaz': 'Не указано', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок в новом квартале', 'ad_total_views': 341, 'ad_id': '294045602', 'ad_area': '15,36сот.', 'ad_total_price': 69120000.0, 'ad_address': 'Новорижское шоссе \nНахабино \nМосковская область, Истра городской округ, Миллениум Парк кп', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 903 123-34-06', 'ad_link': 'https://istra.cian.ru/sale/suburban/294045602/', 'ad_date_created': '24 ноя, 10:32', 'electric': 'Нет', 'gaz': 'Нет', 'water': 'Не указано', 'sewarage': 'Нет'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 15.28 сот.', 'ad_total_views': 152, 'ad_id': '293088118', 'ad_area': '15,28сот.', 'ad_total_price': 6876000.0, 'ad_address': 'Новорижское шоссе \nНовоиерусалимская \nМосковская область, Истра городской округ, Эсквайр Парк кп', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 985 432-42-66', 'ad_link': 'https://istra.cian.ru/sale/suburban/293088118/', 'ad_date_created': 'сегодня, 04:04', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок в новом квартале', 'ad_total_views': 658, 'ad_id': '292475726', 'ad_area': '14,41сот.', 'ad_total_price': 64845000.0, 'ad_address': 'Новорижское шоссе \nНахабино \nМосковская область, Истра городской округ, Миллениум Парк кп, 8-011', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 903 123-34-06', 'ad_link': 'https://istra.cian.ru/sale/suburban/292475726/', 'ad_date_created': '24 ноя, 10:32', 'electric': 'Нет', 'gaz': 'Нет', 'water': 'Не указано', 'sewarage': 'Нет'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 11.05 сот.', 'ad_total_views': 12, 'ad_id': '293953553', 'ad_area': '11,05сот.', 'ad_total_price': 788000.0, 'ad_address': 'Калужское шоссе \nМосковская область, Серпухов городской округ, д. Верхнее Шахлово', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 965 290-57-81', 'ad_link': 'https://serpukhov.cian.ru/sale/suburban/293953553/', 'ad_date_created': '10 ноя, 12:16', 'electric': 'Есть', 'gaz': 'Не указано', 'water': 'Не указано', 'sewarage': 'Не указано'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок в новом квартале', 'ad_total_views': 709, 'ad_id': '294045598', 'ad_area': '13,03сот.', 'ad_total_price': 58635000.0, 'ad_address': 'Новорижское шоссе \nНахабино \nМосковская область, Истра городской округ, Миллениум Парк кп', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 903 123-34-06', 'ad_link': 'https://istra.cian.ru/sale/suburban/294045598/', 'ad_date_created': '24 ноя, 10:32', 'electric': 'Нет', 'gaz': 'Нет', 'water': 'Не указано', 'sewarage': 'Нет'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 16.97 сот., ИЖС', 'ad_total_views': 2238, 'ad_id': '257141508', 'ad_area': '16,97сот.', 'ad_total_price': 11400000.0, 'ad_address': 'Дмитровское шоссе \nТайнинская \nМосковская область, Мытищи, мкр. 2, 3', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 985 543-95-95', 'ad_link': 'https://mytishchi.cian.ru/sale/suburban/257141508/', 'ad_date_created': '30 ноя, 00:48', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок рядом с рекой Истра', 'ad_total_views': 93, 'ad_id': '295283589', 'ad_area': '1230сот.', 'ad_total_price': 123000000.0, 'ad_address': 'Волоколамское шоссе \nНовоиерусалимская \nМосковская область, Истра городской округ, д. Михайловка', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 903 123-34-06', 'ad_link': 'https://istra.cian.ru/sale/suburban/295283589/', 'ad_date_created': '24 ноя, 10:46', 'electric': 'Нет', 'gaz': 'Нет', 'water': 'Не указано', 'sewarage': 'Нет'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 8.3 сот.', 'ad_total_views': 52, 'ad_id': '295408712', 'ad_area': '8,3сот.', 'ad_total_price': 9750000.0, 'ad_address': 'Рублево-Успенское шоссе \nЗвенигород \nМосковская область, Одинцовский городской округ, д. Палицы, улица Массив 1', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 966 047-01-64', 'ad_link': 'https://odintsovo.cian.ru/sale/suburban/295408712/', 'ad_date_created': '30 ноя, 01:40', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 6.5 сот., ИЖС', 'ad_total_views': 311, 'ad_id': '285953078', 'ad_area': '6,5сот.', 'ad_total_price': 7400000.0, 'ad_address': 'Новорижское шоссе \nМанихино I \nМосковская область, Истра городской округ, д. Покровское, бульвар Новорижский', 'ad_type_company': 'Риелтор', 'ad_phone': '+7 964 785-73-71', 'ad_link': 'https://istra.cian.ru/sale/suburban/285953078/', 'ad_date_created': 'вчера, 16:32', 'electric': 'Есть', 'gaz': 'Магистральный по границе', 'water': 'Центральное', 'sewarage': 'Септик'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 11.26 сот.', 'ad_total_views': 59, 'ad_id': '293880666', 'ad_area': '11,26сот.', 'ad_total_price': 1013400.0, 'ad_address': 'Калужское шоссе \nМосковская область, Чехов городской округ, с. Шарапово', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 905 733-60-23', 'ad_link': 'https://chekhov.cian.ru/sale/suburban/293880666/', 'ad_date_created': '30 ноя, 00:56', 'electric': 'Есть', 'gaz': 'Не указано', 'water': 'Не указано', 'sewarage': 'Не указано'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 40 сот.', 'ad_total_views': 276, 'ad_id': '292673567', 'ad_area': '40сот.', 'ad_total_price': 359047599.0, 'ad_address': 'Рублево-Успенское шоссе \nКрасногорская \nМосковская область, Красногорск городской округ, Ильинские Дачи СНТ, улица 4-я Архангельская', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 966 153-69-63', 'ad_link': 'https://krasnogorsk.cian.ru/sale/suburban/292673567/', 'ad_date_created': '29 ноя, 17:28', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Не указано', 'sewarage': 'Не указано'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 6 сот.', 'ad_total_views': 22, 'ad_id': '295408705', 'ad_area': '6сот.', 'ad_total_price': 6970000.0, 'ad_address': 'Рублево-Успенское шоссе \nЗвенигород \nМосковская область, Одинцовский городской округ, д. Палицы, улица Массив 1', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 966 047-01-64', 'ad_link': 'https://odintsovo.cian.ru/sale/suburban/295408705/', 'ad_date_created': '30 ноя, 01:40', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 3200 сот., ИЖС', 'ad_total_views': 425, 'ad_id': '293259736', 'ad_area': '3200сот.', 'ad_total_price': 574476159.0, 'ad_address': 'Рублево-Успенское шоссе \nРаздоры \nМосковская область, Одинцовский городской округ, д. Шульгино, улица Полевая', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 916 147-15-24', 'ad_link': 'https://odintsovo.cian.ru/sale/suburban/293259736/', 'ad_date_created': 'сегодня, 09:16', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 8 сот.', 'ad_total_views': 90, 'ad_id': '270634360', 'ad_area': '8сот.', 'ad_total_price': 1440000.0, 'ad_address': 'Волоколамское шоссе \nРумянцево \nМосковская область, Истра городской округ, Леоново кп, 67', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 967 293-96-92', 'ad_link': 'https://istra.cian.ru/sale/suburban/270634360/', 'ad_date_created': '17 ноя, 08:02', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 100 сот., ИЖС', 'ad_total_views': 201, 'ad_id': '289779652', 'ad_area': '100сот.', 'ad_total_price': 170000000.0, 'ad_address': 'Новорижское шоссе \nЗвенигород \nМосковская область, Одинцовский городской округ, Мэдисон Парк кп, 94', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 915 162-52-04', 'ad_link': 'https://odintsovo.cian.ru/sale/suburban/289779652/', 'ad_date_created': 'сегодня, 09:13', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 14.6 сот.', 'ad_total_views': 203, 'ad_id': '240387358', 'ad_area': '14,6сот.', 'ad_total_price': 2774000.0, 'ad_address': 'Волоколамское шоссе \nМосковская область, Истра городской округ, Куртниково кп', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 967 263-67-79', 'ad_link': 'https://istra.cian.ru/sale/suburban/240387358/', 'ad_date_created': '27 сен, 07:41', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Не указано', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 6 сот., ДНП', 'ad_total_views': 1151, 'ad_id': '289853456', 'ad_area': '6сот.', 'ad_total_price': 300000.0, 'ad_address': 'Новорязанское шоссе \nКузяево \nМосковская область, Раменский городской округ, д. Кузяево', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 985 360-14-50', 'ad_link': 'https://ramenskoye.cian.ru/sale/suburban/289853456/', 'ad_date_created': '30 ноя, 00:51', 'electric': 'Есть', 'gaz': 'Магистральный по границе', 'water': 'Не указано', 'sewarage': 'Нет'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 25.82 сот., ИЖС', 'ad_total_views': 728, 'ad_id': '291494181', 'ad_area': '25,82сот.', 'ad_total_price': 69538000.0, 'ad_address': 'Рублево-Успенское шоссе \nИльинское \nМосковская область, Красногорск городской округ, пос. Ильинское-Усово, Тен кп', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 985 569-60-73', 'ad_link': 'https://krasnogorsk.cian.ru/sale/suburban/291494181/', 'ad_date_created': 'сегодня, 08:41', 'electric': 'Есть', 'gaz': 'Магистральный по границе', 'water': 'Центральное', 'sewarage': 'Центральная'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 25.93 сот.', 'ad_total_views': 354, 'ad_id': '291989147', 'ad_area': '25,93сот.', 'ad_total_price': 280057127.0, 'ad_address': 'Рублево-Успенское шоссе \nКрасногорская \nМосковская область, Красногорск городской округ, Ильинские Дачи СНТ, улица 4-я Архангельская', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 967 208-90-73', 'ad_link': 'https://krasnogorsk.cian.ru/sale/suburban/291989147/', 'ad_date_created': '29 ноя, 17:28', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Не указано', 'sewarage': 'Не указано'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 14.64 сот.', 'ad_total_views': 98, 'ad_id': '285365931', 'ad_area': '14,64сот.', 'ad_total_price': 1933600.0, 'ad_address': 'Симферопольское шоссе \nЛуч \nМосковская область, Чехов городской округ, д. Баранцево, Швейцарская Долина кп', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 964 716-10-31', 'ad_link': 'https://chekhov.cian.ru/sale/suburban/285365931/', 'ad_date_created': '30 ноя, 00:46', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Не указано', 'sewarage': 'Не указано'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 8 сот., ДНП', 'ad_total_views': 606, 'ad_id': '282359877', 'ad_area': '8сот.', 'ad_total_price': 1440000.0, 'ad_address': 'Волоколамское шоссе \nЗеленоград — Крюково \nИстра \nМосковская область, м.\xa0Зеленоград — Крюково, Истра городской округ, д. Духанино', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 985 360-14-50', 'ad_link': 'https://istra.cian.ru/sale/suburban/282359877/', 'ad_date_created': '30 ноя, 00:51', 'electric': 'Есть', 'gaz': 'Магистральный по границе', 'water': 'Не указано', 'sewarage': 'Не указано'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 14.81 сот.', 'ad_total_views': 953, 'ad_id': '278578391', 'ad_area': '14,81сот.', 'ad_total_price': 2195259.0, 'ad_address': 'Новорижское шоссе \nДубосеково \nМосковская область, Волоколамский городской округ, Эко Озеро кп, 2', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 965 149-23-24', 'ad_link': 'https://www.cian.ru/sale/suburban/278578391/', 'ad_date_created': 'сегодня, 09:00', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 21.5 сот., ИЖС', 'ad_total_views': 729, 'ad_id': '291989138', 'ad_area': '21,5сот.', 'ad_total_price': 18500000.0, 'ad_address': 'Киевское шоссе \nАпрелевка \nМосковская область, Наро-Фоминский городской округ, д. Мартемьяново, улица Зеленая, 117', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 967 208-90-37', 'ad_link': 'https://naro-fominsk.cian.ru/sale/suburban/291989138/', 'ad_date_created': '29 ноя, 17:28', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Не указано', 'sewarage': 'Не указано'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 11.83 сот.', 'ad_total_views': 52, 'ad_id': '278578321', 'ad_area': '11,83сот.', 'ad_total_price': 2314952.0, 'ad_address': 'Симферопольское шоссе \nСерпухов \nМосковская область, Серпухов городской округ, Петрухино-1 кп', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 966 053-20-56', 'ad_link': 'https://serpukhov.cian.ru/sale/suburban/278578321/', 'ad_date_created': '30 ноя, 01:17', 'electric': 'Не указано', 'gaz': 'Не указано', 'water': 'Не указано', 'sewarage': 'Не указано'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 19.9 сот.', 'ad_total_views': 80, 'ad_id': '291989128', 'ad_area': '19,9сот.', 'ad_total_price': 120000000.0, 'ad_address': 'Новорижское шоссе \nНахабино \nМосковская область, Истра городской округ, д. Чесноково', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 966 153-69-63', 'ad_link': 'https://istra.cian.ru/sale/suburban/291989128/', 'ad_date_created': '29 ноя, 17:28', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Не указано', 'sewarage': 'Не указано'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 14.17 сот.', 'ad_total_views': 135, 'ad_id': '290535908', 'ad_area': '14,17сот.', 'ad_total_price': 2852939.0, 'ad_address': 'Симферопольское шоссе \nШарапова Охота \nМосковская область, Серпухов городской округ, Вяземские Сады кп', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 965 109-94-35', 'ad_link': 'https://serpukhov.cian.ru/sale/suburban/290535908/', 'ad_date_created': '10 ноя, 11:51', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Есть', 'sewarage': 'Есть'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Единственный участок в поселке!', 'ad_total_views': 410, 'ad_id': '291989145', 'ad_area': '15сот.', 'ad_total_price': 44800000.0, 'ad_address': 'Новорижское шоссе \nНахабино \nМосковская область, Истра городской округ, д. Веледниково, улица Усадебная', 'ad_type_company': 'Агентство недвижимости', 'ad_phone': '+7 964 568-45-35', 'ad_link': 'https://istra.cian.ru/sale/suburban/291989145/', 'ad_date_created': '29 ноя, 17:28', 'electric': 'Есть', 'gaz': 'Есть', 'water': 'Не указано', 'sewarage': 'Не указано'},
+            #     {'parse_timestamp': str(datetime.now()), 'ad_name': 'Участок, 7 сот., ИЖС', 'ad_total_views': 256, 'ad_id': '293386154', 'ad_area': '7сот.', 'ad_total_price': 5595000.0, 'ad_address': 'Волоколамское шоссе \n73 км \nМосковская область, Истра городской округ, Аркадия кп', 'ad_type_company': 'Застройщик', 'ad_phone': '+7 985 055-41-48', 'ad_link': 'https://istra.cian.ru/sale/suburban/293386154/', 'ad_date_created': '4 ноя, 04:05', 'electric': 'Есть', 'gaz': 'Магистральный по границе', 'water': 'Есть', 'sewarage': 'Центральная'}
+            # ]
+
+
+            # write msg about found ads
+            # write_execution_logs(f'Found avito - {len(avito_ads)}\nFound cian - {len(cian_ads)}')
+            # write_execution_logs(f'Exceptions after parsing and unpacking - {exceptions_msg}')
+            logging.info(f'Found avito - {len(avito_ads)}')
+            logging.info(f'Found cian - {len(cian_ads)}')
+            if exceptions_msg:
+                logging.error(f'Exceptions after parsing and unpacking - {exceptions_msg}')
             
             # update prices and views history     
             try:
                 update_history_csv(cian_ads, CIAN_HISTORY_CSV_FN)
                 update_history_csv(avito_ads, AVITO_HISTORY_CSV_FN)
             except Exception as ex:
-                exceptions_msg += f'\nEXCPETIONS WITH UPDATE HISTORY CSV FILES - {ex}\n'
-            # else:
-            #     print(f'[+]History csv for cian and avito was updated!, TODAY - [{str(datetime.now())}]')
+                ex_msg = f'\nEXCEPTION WITH UPDATE HISTORY CSV FILES - {ex}\n'
+                exceptions_msg += ex_msg
+                logging.error(ex_msg)
+            else:
+                msg = 'History csv for cian and avito was updated!'
+                logging.info(msg)
            
             # update total ads
             try:
                 update_total_csv(cian_ads, CIAN_TOTAL_CSV_FN)
                 update_total_csv(avito_ads, AVITO_TOTAL_CSV_FN)
             except Exception as ex:
-                exceptions_msg += f'\nEXCPETIONS WITH UPDATE TOTAL CSV FILES - {ex}\n'
-            # else:
-                # print(f'[+]Total csv for cian and avito was updated!, TODAY - [{str(datetime.now())}]')
-    
+                ex_msg = f'\nEXCEPTION WITH UPDATE TOTAL CSV FILES - {ex}\n'
+                exceptions_msg += ex_msg
+                logging.error(ex_msg)
+            else:
+                msg = 'Total csv for cian and avito was updated!'
+                logging.info(msg)
+
+            # write msg about update total and history
+            # write_execution_logs(f'Exceptions after update total and history - {exceptions_msg}')
+     
         # send msg about errors
         if exceptions_msg:
-            send_email_msg(
-                subject_msg=ERROR_NOTIFICATION_SUBJECT, 
-                send_from=MAIL_LOGIN, password=MAIL_PASSWORD,
-                send_to=MAIL_SEND_TO, body_msg=exceptions_msg
-            )
+            try:
+                send_email_errors = send_email_msg(
+                    subject_msg=ERROR_NOTIFICATION_SUBJECT, 
+                    send_from=MAIL_LOGIN, password=MAIL_PASSWORD,
+                    send_to=MAIL_SEND_TO, body_msg=exceptions_msg
+                )
+            except Exception as ex:
+                msg = '\nEXCEPTION WITH SENDING EMAIL MESSAGE!\n'
+                logging.info(msg)
+            else:
+                logging.info('Sending email was completed')
+                if send_email_errors:
+                    logging.error(str(send_email_errors))
         
         # next program run in the 22:00
         next_time_point = datetime.combine(datetime.now().date(), time(22, 0, 0))
         if next_time_point < datetime.now():
             next_time_point += timedelta(days=1)
 
-        msg = f'[+]Завершение работы парсера - {[{str(datetime.now())}]}, следующий запуск в {str(next_time_point)}'
+        msg = f'Завершение работы парсера, следующий запуск в [{str(next_time_point)}]'
         print(msg)
-        with open('program_time_status.txt', 'a', encoding='utf-8') as f:
-            f.write(msg + '\n')
+        logging.info(msg)
+        # write_execution_logs(msg)
 
         # sleep to point 22:00 today or tommorow 
         sleep_to_point(next_time_point)

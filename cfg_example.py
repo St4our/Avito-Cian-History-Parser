@@ -9,7 +9,10 @@ MAIL_PASSWORD = ''
 MAIL_SEND_TO = ''  # any mail
 ERROR_NOTIFICATION_SUBJECT = 'PARSING ERROR! (ОШИБКА ПАРСЕРА!): Ошибка в работе приложения по поиску земельных участков на Avito и CIAN!'
 
-# FileNames for save data
+# PARSE TIMESTAMP FORMAT
+TIMESTAMP_DT_FORMAT = '%Y-%m-%d %H:%M'
+
+# OUTPUT FILES PATH
 AVITO_TOTAL_CSV_FN = 'avito_total.csv'
 CIAN_TOTAL_CSV_FN = 'cian_total.csv'
 AVITO_HISTORY_CSV_FN = 'avito_history.csv'

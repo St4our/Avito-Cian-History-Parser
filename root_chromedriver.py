@@ -17,11 +17,16 @@ from selenium.webdriver.chrome.options import Options as ChromeOptions
 class RootChromeDriver:
     ''' object for settings a chrome driver '''
     def __init__(self):
-        self.profile_path = (
-            getenv('LOCALAPPDATA') +
-            r'\Google\Chrome\User Data\ProfileDevTools')
-        if not path_exists(self.profile_path):
-            print('[!][ChromeDriverConfig] ProfileDevTools doesn\'t exists, will be create new')
+        appdata_path = getenv('LOCALAPPDATA55')
+        if appdata_path:
+            self.profile_path = appdata_path + r'\Google\Chrome\User Data\ProfileDevTools'
+            if not path_exists(self.profile_path):
+                print('[!] ProfileDevTools doesn\'t exists, will be create new')
+            else:
+                print('[*] PrifleDevTools path was found')
+        else:
+            print('[*] PrifleDevTools path was not build')
+            self.profile_path = ''
         self.opts = ChromeOptions()
         self._set_my_config()   # setting opts
         
@@ -93,7 +98,8 @@ class RootChromeDriver:
 
     def _init_local_driver(self):
         # self.opts.experimental_options('prefs', {'intl.accept_languages': 'en,en_US'})
-        self.opts.add_argument(f"--user-data-dir={self.profile_path}")
+        if self.profile_path:
+            self.opts.add_argument(f"--user-data-dir={self.profile_path}")
 
         driver_path = ChromeDriverManager().install()
         service = ChromeService(driver_path)
@@ -103,3 +109,10 @@ class RootChromeDriver:
         driver.implicitly_wait(5)
         driver.maximize_window()
         return driver
+    
+if __name__ == '__main__':
+    root_driver = RootChromeDriver()
+    driver = root_driver._init_local_driver()
+    input('wait..')
+    driver.close()
+    driver.quit()

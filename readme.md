@@ -1,10 +1,10 @@
 # ИНСТРУКЦИЯ ПО ЗАПУСКУ ПРОГРАММЫ
 
-- Инициализировать env (виртуальное окружение): "py -m venv env"
+- Инициализировать env (виртуальное окружение): "python3 -m venv env"
 
 - Запустить виртуальное окружение: "env\Scripts\activate"  | *(должно появиться (env) в терминале)*
 
-- Установить зависимости из requirements.txt: "pip install -r requirements.txt"
+- Установить зависимости из requirements.txt: "pip3 install -r requirements.txt"
 
 - cfg.py - вы должны создать сами, я оставлю пример в каталоге (cfg_example.py который надо будет переименовать в cfg.py)
 
@@ -45,7 +45,7 @@ cd dist
 
 '''
 (bash)
-./main
+python3 main.py
 '''
 
 # (для MacOS) Есть вторая вариация - создание ".app" файла:
